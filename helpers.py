@@ -35,13 +35,13 @@ def show_only(context, objs):
         obj.hide_render = False
         obj.hide_select = False
 
-def is_valid(data_block):
+def is_valid(data):
     """Returns whether a reference to a data-block is valid."""
 
-    if not data_block:
+    if not data:
         return False
     try:
-        data_block.id_data
+        data.id_data
     except (ReferenceError, KeyError):
         return False
     return True
@@ -105,42 +105,71 @@ def load_selection(state):
     if is_valid(state.active):
         bpy.context.view_layer.objects.active = state.active
 
-def save_properties(obj):
+def save_property(data, prop_path):
+    if isinstance(prop_path, bpy.types.Property):
+        prop = prop_path
+        prop_path = prop.identifier
+    else:
+        dot_idx = prop_path.rindex('.')
+        data = data.path_resolve(prop_path[:dot_idx], False)
+        prop = data.bl_rna.properties[prop_path[dot_idx+1:]]
+
+    # if not prop.is_runtime:
+    if prop.is_readonly:
+        return {}
+    prop_id = prop.identifier
+    try:
+        if prop.type == 'COLLECTION':
+            return prop_path, [save_property(subprop) for subprop in getattr(data, prop_id)]
+        elif getattr(prop, 'is_array', False):
+            return prop_path, getattr(data, prop_id)[:]
+        else:
+            print ("saving", prop_path, prop_id, getattr(data, prop_id))
+            return prop_path, getattr(data, prop_id)
+    except:
+        raise
+        # pass
+    return None, None
+
+def load_property(data, prop_path, value):
+    if '.' in prop_path:
+        dot_idx = prop_path.rindex('.')
+        data = data.path_resolve(prop_path[:dot_idx], False)
+        prop_id = prop_path[dot_idx+1:]
+    else:
+        prop_id = prop_path
+
+    try:
+        prop = data.bl_rna.properties[prop_id]
+        if prop.type == 'COLLECTION':
+            collection = getattr(data, prop_id)
+            collection.clear()
+            for saved_el in value:
+                el = collection.add()
+                load_properties(el, saved_el)
+        elif not prop.is_readonly:
+            print("setting", data, prop_id, prop.type, value, getattr(value, 'name', "noname"))
+            setattr(data, prop_id, value)
+            print("now=", getattr(data, prop_id))
+    except:
+        raise
+        # pass
+
+def save_object(data): #save_data
     """Returns a dictionary storing the properties of a Blender object."""
 
     saved = {}
-    for prop in obj.bl_rna.properties:
-        if not prop.is_runtime:
-            # Only save user properties
-            continue
-        prop_id = prop.identifier
-        try:
-            if prop.type == 'COLLECTION':
-                saved[prop_id] = [save_properties(el) for el in getattr(obj, prop_id)]
-            elif getattr(prop, 'is_array', False):
-                saved[prop_id] = getattr(obj, prop_id)[:]
-            else:
-                saved[prop_id] = getattr(obj, prop_id)
-        except:
-            continue
+    for prop in data.bl_rna.properties:
+        prop_path, value = save_property(data, prop)
+        if prop_id:
+            saved[prop_id] = value
     return saved
 
-def load_properties(obj, saved):
+def load_object(data, saved): #load_data
     """Restores properties from a dictionary returned by save_properties()"""
 
-    for prop_id, value in saved.items():
-        try:
-            prop = obj.bl_rna.properties[prop_id]
-            if prop.type == 'COLLECTION':
-                collection = getattr(obj, prop_id)
-                collection.clear()
-                for saved_el in value:
-                    el = collection.add()
-                    load_properties(el, saved_el)
-            elif not prop.is_readonly:
-                setattr(obj, prop_id, value)
-        except:
-            continue
+    for prop_path, value in saved.items():
+        load_property(data, prop_path, value)
 
 def is_defaulted(obj):
     """Returns whether the properties of an object are set to their default values."""

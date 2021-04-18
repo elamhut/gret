@@ -17,6 +17,7 @@ from gret.helpers import (
     show_only,
 )
 from gret.material.helpers import SolidPixels, Node
+from gret.operator import Operator
 
 # TODO
 # - AO floor
@@ -315,13 +316,16 @@ All faces from all objects assigned to the active material are assumed to contri
 
         return {'FINISHED'}
 
-class GRET_OT_quick_unwrap(bpy.types.Operator):
+class GRET_OT_quick_unwrap(Operator):
     #tooltip
     """Smart unwrap and pack UVs for all objects that have the active material assigned"""
 
     bl_idname = 'gret.quick_unwrap'
     bl_label = "Quick Unwrap"
     bl_options = {'REGISTER', 'UNDO'}
+
+    save_context_props = ['area.ui_type', 'scene.tool_settings.use_uv_select_sync']
+    save_mesh_props = ['uv_layers.active_index']
 
     uv_layer_name: bpy.props.StringProperty(
         name="UV Layer",
@@ -354,67 +358,57 @@ Defaults to the setting found in addon preferences if not specified""",
     def poll(cls, context):
         return context.object and context.object.active_material and context.mode == 'EDIT_MESH'
 
-    def execute(self, context):
+    def run(self, context):
         mat = context.object.active_material
-        saved_area_ui_type = context.area.ui_type
-        saved_use_uv_select_sync = context.scene.tool_settings.use_uv_select_sync
         saved_selection = save_selection()
-        saved_active_uv_layers = {}  # Object to UV layer
         margin = 1.0 / 128 * 2
         self.uv_layer_name = self.uv_layer_name or prefs.quick_unwrap_uv_layer_name
 
-        try:
-            # Select all faces of all objects that share the material
-            bpy.ops.object.editmode_toggle()
-            context.scene.tool_settings.use_uv_select_sync = True
-            objs = [o for o in context.scene.objects if mat.name in o.data.materials]
-            select_only(context, objs)
-            bpy.ops.object.editmode_toggle()
-            bpy.ops.mesh.reveal()
-            bpy.ops.mesh.select_mode(type='FACE')
-            bpy.ops.object.editmode_toggle()
-            for obj in objs:
-                saved_active_uv_layers[obj] = obj.data.uv_layers.active
-                uv = obj.data.uv_layers.get(self.uv_layer_name)
-                if not uv:
-                    uv = obj.data.uv_layers.new(name=self.uv_layer_name)
-                uv.active = True
-                for face in obj.data.polygons:
-                    face.select = obj.data.materials[face.material_index] == mat
-            bpy.ops.object.editmode_toggle()
+        # Select all faces of all objects that share the material
+        bpy.ops.object.editmode_toggle()
+        context.scene.tool_settings.use_uv_select_sync = True
+        objs = [o for o in context.scene.objects if mat.name in o.data.materials]
+        select_only(context, objs)
+        bpy.ops.object.editmode_toggle()
+        bpy.ops.mesh.reveal()
+        bpy.ops.mesh.select_mode(type='FACE')
+        bpy.ops.object.editmode_toggle()
+        for obj in objs:
+            uv = obj.data.uv_layers.get(self.uv_layer_name)
+            if not uv:
+                uv = obj.data.uv_layers.new(name=self.uv_layer_name)
+            uv.active = True
+            for face in obj.data.polygons:
+                face.select = obj.data.materials[face.material_index] == mat
+        bpy.ops.object.editmode_toggle()
 
-            # Unwrap
-            bpy.ops.uv.smart_project(
-                angle_limit=self.angle_limit,
-                island_margin=margin,
-                area_weight=self.area_weight,
-                correct_aspect=True,
-                scale_to_bounds=False)
+        # Unwrap
+        bpy.ops.uv.smart_project(
+            angle_limit=self.angle_limit,
+            island_margin=margin,
+            area_weight=self.area_weight,
+            correct_aspect=True,
+            scale_to_bounds=False)
 
-            # If set and TexTools is available, rotate islands
-            if self.align_with_world:
-                try:
-                    context.area.ui_type = 'UV'
-                    context.scene.tool_settings.use_uv_select_sync = False
-                    bpy.ops.uv.textools_island_align_world(steps=2)
-                except AttributeError:
-                    pass
-
-            # If available, pack using an addon
+        # If set and TexTools is available, rotate islands
+        if self.align_with_world:
             try:
-                context.scene.uvp2_props.margin = margin
-                context.scene.uvp2_props.rot_enable = not self.align_with_world
-                bpy.ops.uvpackmaster2.uv_pack()
+                context.area.ui_type = 'UV'
+                context.scene.tool_settings.use_uv_select_sync = False
+                bpy.ops.uv.textools_island_align_world(steps=2)
             except AttributeError:
                 pass
-        finally:
-            for obj, uv_layer in saved_active_uv_layers.items():
-                obj.data.uv_layers.active = uv_layer
-            load_selection(saved_selection)
-            context.scene.tool_settings.use_uv_select_sync = saved_use_uv_select_sync
-            context.area.ui_type = saved_area_ui_type
-            # Exiting edit mode here causes uvpackmaster2 to break, it's doing some weird modal stuff
-            # bpy.ops.object.mode_set(mode='OBJECT')
+
+        # If available, pack using an addon
+        try:
+            context.scene.uvp2_props.margin = margin
+            context.scene.uvp2_props.rot_enable = not self.align_with_world
+            bpy.ops.uvpackmaster2.uv_pack()
+        except AttributeError:
+            pass
+        load_selection(saved_selection)
+        # Exiting edit mode here causes uvpackmaster2 to break, it's doing some weird modal stuff
+        # bpy.ops.object.mode_set(mode='OBJECT')
 
         return {'FINISHED'}
 

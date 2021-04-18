@@ -20,7 +20,7 @@ class GRET_OT_deduplicate_materials(bpy.types.Operator):
         for mat in bpy.data.materials:
             match = re.match(r"^(.*)\.\d\d\d$", mat.name)
             if match:
-                original_name, = match.groups(0)
+                original_name, = match.groups()
                 original = bpy.data.materials.get(original_name)
                 if original:
                     redirects[mat] = original
