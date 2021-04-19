@@ -10,9 +10,6 @@ from gret.helpers import (
     beep,
     fail_if_invalid_export_path,
     get_export_path,
-    get_nice_export_report,
-    load_selection,
-    save_selection,
     select_only,
     show_only,
 )
@@ -142,7 +139,7 @@ bake_items = [
     ('CURVATURE', "Curvature", "Curvature, centered on gray"),
 ]
 
-class GRET_OT_bake(bpy.types.Operator):
+class GRET_OT_bake(Operator):
     #tooltip
     """Bake and export the texture.
 All faces from all objects assigned to the active material are assumed to contribute"""
@@ -150,6 +147,20 @@ All faces from all objects assigned to the active material are assumed to contri
     bl_idname = 'gret.bake'
     bl_label = "Bake"
     bl_options = {'INTERNAL'}
+
+    save_selection = True
+    save_context_props = [
+        'scene.render.engine',
+        'scene.render.bake.margin',
+        'scene.render.bake.use_selected_to_active',
+        'scene.cycles.samples',
+    ]
+    save_object_props = [
+        'hide_render',
+        'hide_select',
+        'hide_viewport',
+        'matrix_world',
+    ]
 
     debug: bpy.props.BoolProperty(
         name="Debug",
@@ -208,7 +219,6 @@ All faces from all objects assigned to the active material are assumed to contri
 
         # Explode objects. Not strictly necessary anymore since AO node has only_local flag
         for obj_idx, obj in enumerate(objs):
-            self.saved_transforms[obj] = obj.matrix_world.copy()
             obj.matrix_world = Matrix.Translation((100.0 * obj_idx, 0.0, 0.0))
 
         # Setup common to all bakers
@@ -263,7 +273,7 @@ All faces from all objects assigned to the active material are assumed to contri
 
         logger.indent -= 1
 
-    def execute(self, context):
+    def run(self, context):
         bake = context.object.active_material.texture_bake
 
         try:
@@ -272,47 +282,16 @@ All faces from all objects assigned to the active material are assumed to contri
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
 
-        saved_selection = save_selection()
-        saved_render_engine = context.scene.render.engine
-        saved_render_bake_margin = context.scene.render.bake.margin  # Don't mistake for bake_margin
-        saved_render_use_selected_to_active = context.scene.render.bake.use_selected_to_active
-        saved_cycles_samples = context.scene.cycles.samples
-        saved_use_global_undo = context.preferences.edit.use_global_undo
-        context.preferences.edit.use_global_undo = False
-        self.exported_files = []
         self.new_materials = []
         self.new_images = []
-        self.saved_transforms = {}
-        logger.start_logging()
 
-        try:
-            start_time = time.time()
-            self._execute(context)
-            # Finished without errors
-            elapsed = time.time() - start_time
-            self.report({'INFO'}, get_nice_export_report(self.exported_files, elapsed))
-            beep(pitch=3, num=1)
-        finally:
-            # Clean up
-            if not self.debug:
-                while self.new_materials:
-                    bpy.data.materials.remove(self.new_materials.pop())
-                while self.new_images:
-                    bpy.data.images.remove(self.new_images.pop())
-            for obj, matrix_world in self.saved_transforms.items():
-                obj.matrix_world = matrix_world
-            del self.saved_transforms
+        self._execute(context)
+        # beep(pitch=3, num=1)
 
-            load_selection(saved_selection)
-            context.scene.render.engine = saved_render_engine
-            context.scene.render.bake.margin = saved_render_bake_margin
-            context.scene.render.bake.use_selected_to_active = saved_render_use_selected_to_active
-            context.scene.cycles.samples = saved_cycles_samples
-            context.preferences.edit.use_global_undo = saved_use_global_undo
-            logger.end_logging()
-
-        if self.debug:
-            bpy.ops.ed.undo_push()
+        while self.new_materials:
+            bpy.data.materials.remove(self.new_materials.pop())
+        while self.new_images:
+            bpy.data.images.remove(self.new_images.pop())
 
         return {'FINISHED'}
 
@@ -360,7 +339,6 @@ Defaults to the setting found in addon preferences if not specified""",
 
     def run(self, context):
         mat = context.object.active_material
-        saved_selection = save_selection()
         margin = 1.0 / 128 * 2
         self.uv_layer_name = self.uv_layer_name or prefs.quick_unwrap_uv_layer_name
 
@@ -406,7 +384,6 @@ Defaults to the setting found in addon preferences if not specified""",
             bpy.ops.uvpackmaster2.uv_pack()
         except AttributeError:
             pass
-        load_selection(saved_selection)
         # Exiting edit mode here causes uvpackmaster2 to break, it's doing some weird modal stuff
         # bpy.ops.object.mode_set(mode='OBJECT')
 

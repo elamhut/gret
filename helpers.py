@@ -109,10 +109,12 @@ def save_property(data, prop_path):
     if isinstance(prop_path, bpy.types.Property):
         prop = prop_path
         prop_path = prop.identifier
-    else:
+    elif '.' in prop_path:
         dot_idx = prop_path.rindex('.')
         data = data.path_resolve(prop_path[:dot_idx], False)
         prop = data.bl_rna.properties[prop_path[dot_idx+1:]]
+    else:
+        prop = data.bl_rna.properties[prop_path]
 
     # if not prop.is_runtime:
     if prop.is_readonly:
@@ -122,7 +124,9 @@ def save_property(data, prop_path):
         if prop.type == 'COLLECTION':
             return prop_path, [save_property(subprop) for subprop in getattr(data, prop_id)]
         elif getattr(prop, 'is_array', False):
-            return prop_path, getattr(data, prop_id)[:]
+            print ("saving array", prop_path, prop_id, getattr(data, prop_id))
+            # return prop_path, getattr(data, prop_id)[:]
+            return prop_path, getattr(data, prop_id).copy()
         else:
             print ("saving", prop_path, prop_id, getattr(data, prop_id))
             return prop_path, getattr(data, prop_id)

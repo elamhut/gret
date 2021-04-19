@@ -14,9 +14,7 @@ from gret.helpers import (
     get_context,
     get_export_path,
     get_nice_export_report,
-    load_properties,
     load_selection,
-    save_properties,
     save_selection,
     select_only,
 )
